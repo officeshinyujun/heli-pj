@@ -3,6 +3,7 @@ import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { useEffect, useRef, useState } from "react";
 import { RigidBody, Physics } from "@react-three/rapier";
 import * as THREE from "three";
+import backImage from "../../assets/sky.jpg"
 import styles from "./index.module.scss";
 
 interface ModelProps {
@@ -13,7 +14,7 @@ interface ModelProps {
 
 function HeliModel({ position, heliRef, cameraRef }: ModelProps) {
     const gltf = useLoader(GLTFLoader, "/bell_huey_helicopter.glb");
-    const speed = 0.3;
+    const speed = 0.1;
     const rotationSpeed = 0.005;
     const dampingFactor = 0.98;
     const verticalSpeed = 0.2;
@@ -171,27 +172,44 @@ function HeliModel({ position, heliRef, cameraRef }: ModelProps) {
             linearDamping={0.5}
             angularDamping={0.9}
         >
-            <primitive object={gltf.scene} />
+            <primitive object={gltf.scene}/>
         </RigidBody>
     );
 }
+
+// function Forest({ position }: { position: [number, number, number] }) {
+//     const forest = useLoader(GLTFLoader, "/Low_poly_Forest.glb");
+//     const forestRef = useRef(null);
+//
+//     return (
+//         <RigidBody type="fixed" position={position} ref={forestRef}>
+//             <primitive object={forest.scene} scale={0.5} />
+//         </RigidBody>
+//     );
+// }
+
 
 export default function GamePage() {
     const heliRef = useRef(null);
     const cameraRef = useRef(null);
 
     return (
-        <div className={styles.container} style={{ background: "gray" }}>
-            <Canvas camera={{ position: [0, 10, -10], fov: 75 }} ref={cameraRef}>
+        <div className={styles.container}>
+            <Canvas camera={{ position: [0, 10, -10], fov: 75 }} ref={cameraRef}
+                    onCreated={({ scene }) => {
+                        scene.background = new THREE.TextureLoader().load(backImage);
+                    }}
+                >
                 <Physics debug={false}>
                     <ambientLight intensity={10} position={[0, 10, 0]} />
-                    <HeliModel position={[0, 10, 0]} heliRef={heliRef} cameraRef={cameraRef} />
+                    <HeliModel position={[0, 20, 0]} heliRef={heliRef} cameraRef={cameraRef} />
                     <RigidBody type="fixed">
                         <mesh>
-                            <boxGeometry args={[30, 1, 30]} />
+                            <boxGeometry args={[30, -1, 30]} />
                             <meshStandardMaterial color="gray" />
                         </mesh>
                     </RigidBody>
+                    {/*<Forest position={[0, 0, 0]} />*/}
                 </Physics>
             </Canvas>
         </div>
