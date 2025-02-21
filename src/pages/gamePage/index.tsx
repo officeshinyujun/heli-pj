@@ -1,7 +1,6 @@
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
-import { Suspense, useEffect, useRef, useState } from "react";
-import { OrbitControls } from "@react-three/drei";
+import { useEffect, useRef, useState } from "react";
 import { RigidBody, Physics } from "@react-three/rapier";
 import * as THREE from "three";
 import styles from "./index.module.scss";
@@ -9,18 +8,19 @@ import styles from "./index.module.scss";
 interface ModelProps {
     position: [number, number, number];
     heliRef: any;
+    cameraRef: any;
 }
 
-function HeliModel({ position, heliRef }: ModelProps) {
+function HeliModel({ position, heliRef, cameraRef }: ModelProps) {
     const gltf = useLoader(GLTFLoader, "/bell_huey_helicopter.glb");
-    const speed = 0.5;
+    const speed = 0.3;
     const rotationSpeed = 0.005;
-    const dampingFactor = 0.95;
-    const verticalSpeed = 0.3;
-    const tiltFactor = 0.01; // 기울기 강도
-    const recoverySpeed = 0.05; // 복원 속도
+    const dampingFactor = 0.98;
+    const verticalSpeed = 0.2;
+    const tiltIncrement = 0.001; // 기울어지는 속도
+    const restoreFactor = 0.5;  // 복구 속도 (0~1, 1에 가까울수록 원래 자세로 빠르게 복귀)
+    const maxTilt = Math.PI / 24; // 최대 기울기 (15도)
 
-    // 회전 상태 (Yaw, Pitch, Roll)
     const [yawAngle, setYawAngle] = useState(0);
     const [pitchAngle, setPitchAngle] = useState(0);
     const [rollAngle, setRollAngle] = useState(0);
@@ -80,53 +80,72 @@ function HeliModel({ position, heliRef }: ModelProps) {
         }
     };
 
-    useFrame(() => {
+    useFrame(({ camera }) => {
         if (heliRef.current) {
             const rigidBody = heliRef.current;
             const currentVelocity = rigidBody.linvel();
-
-            // 회전값 업데이트 (Yaw)
             let newYaw = yawAngle;
+
             if (keyState.a) newYaw += rotationSpeed;
             if (keyState.d) newYaw -= rotationSpeed;
 
-            // 이동 벡터 계산
-            const moveX = (keyState.w ? Math.sin(newYaw) : 0) - (keyState.s ? Math.sin(newYaw) : 0);
-            const moveZ = (keyState.w ? Math.cos(newYaw) : 0) - (keyState.s ? Math.cos(newYaw) : 0);
+            const forward = new THREE.Vector3(Math.sin(newYaw), 0, Math.cos(newYaw));
+            const moveX = (keyState.w ? forward.x : 0) - (keyState.s ? forward.x : 0);
+            const moveZ = (keyState.w ? forward.z : 0) - (keyState.s ? forward.z : 0);
             const yMove = (keyState.space ? verticalSpeed : 0) - (keyState.shift ? verticalSpeed : 0);
 
-            // 기울기 업데이트 (Yaw 방향 고려)
+            // 기울기 업데이트 (한계값 적용)
             let newPitch = pitchAngle;
             let newRoll = rollAngle;
 
-            if (keyState.w) newPitch += tiltFactor * Math.cos(newYaw); // 전진 시 Pitch 감소
-            if (keyState.s) newPitch -= tiltFactor * Math.cos(newYaw); // 후진 시 Pitch 증가
-            if (keyState.a) newRoll -= tiltFactor * Math.sin(newYaw);  // 좌회전 시 Roll 증가
-            if (keyState.d) newRoll += tiltFactor * Math.sin(newYaw);  // 우회전 시 Roll 감소
+            // 방향에 따른 기울기 조정: 앞, 뒤, 좌, 우
+            if (keyState.w) newPitch = Math.min(maxTilt, newPitch + tiltIncrement);  // 앞
+            else if (keyState.s) newPitch = Math.max(-maxTilt, newPitch - tiltIncrement);  // 뒤
+            else newPitch *= restoreFactor;
 
-            // 복원 로직: 입력이 없으면 점점 0도로 되돌림
-            newPitch *= dampingFactor;
-            newRoll *= dampingFactor;
+            if (keyState.a) newRoll = Math.max(-maxTilt, newRoll - tiltIncrement);  // 좌
+            else if (keyState.d) newRoll = Math.min(maxTilt, newRoll + tiltIncrement);  // 우
+            else newRoll *= restoreFactor;
 
-            // Quaternion으로 회전 적용
-            const quaternion = new THREE.Quaternion();
-            quaternion.setFromEuler(new THREE.Euler(newPitch, newYaw, newRoll));
+            // 최종 회전 적용 (Yaw, Pitch, Roll)
+            const euler = new THREE.Euler(newPitch, newYaw, newRoll, "YXZ");
+            const quaternion = new THREE.Quaternion().setFromEuler(euler);
 
-            // Rigidbody 업데이트
-            rigidBody.setLinvel({
-                x: currentVelocity.x * dampingFactor + moveX * speed,
-                y: currentVelocity.y * dampingFactor + yMove,
-                z: currentVelocity.z * dampingFactor + moveZ * speed
-            }, true);
+            rigidBody.setLinvel(
+                {
+                    x: currentVelocity.x * dampingFactor + moveX * speed,
+                    y: currentVelocity.y * dampingFactor + yMove,
+                    z: currentVelocity.z * dampingFactor + moveZ * speed,
+                },
+                true
+            );
 
-            rigidBody.setRotation({
-                x: quaternion.x,
-                y: quaternion.y,
-                z: quaternion.z,
-                w: quaternion.w
-            }, true);
+            rigidBody.setRotation(
+                {
+                    x: quaternion.x,
+                    y: quaternion.y,
+                    z: quaternion.z,
+                    w: quaternion.w,
+                },
+                true
+            );
 
-            // 상태 업데이트
+            // 카메라 따라가기
+            if (cameraRef.current) {
+                const heliPos = rigidBody.translation();
+                const offset = new THREE.Vector3(0, 5, -10).applyQuaternion(
+                    new THREE.Quaternion().setFromEuler(new THREE.Euler(0, newYaw, 0, "YXZ"))
+                );
+                const targetPosition = new THREE.Vector3(
+                    heliPos.x,
+                    heliPos.y,
+                    heliPos.z
+                ).add(offset);
+
+                camera.position.lerp(targetPosition, 0.1);
+                camera.lookAt(heliPos.x, heliPos.y, heliPos.z);
+            }
+
             setYawAngle(newYaw);
             setPitchAngle(newPitch);
             setRollAngle(newRoll);
@@ -136,7 +155,6 @@ function HeliModel({ position, heliRef }: ModelProps) {
     useEffect(() => {
         window.addEventListener("keydown", handleKeyDown);
         window.addEventListener("keyup", handleKeyUp);
-
         return () => {
             window.removeEventListener("keydown", handleKeyDown);
             window.removeEventListener("keyup", handleKeyUp);
@@ -147,7 +165,6 @@ function HeliModel({ position, heliRef }: ModelProps) {
         <RigidBody
             ref={heliRef}
             position={position}
-            enabledRotations={[true, true, true]}
             type="dynamic"
             mass={5}
             gravityScale={0.2}
@@ -161,20 +178,20 @@ function HeliModel({ position, heliRef }: ModelProps) {
 
 export default function GamePage() {
     const heliRef = useRef(null);
+    const cameraRef = useRef(null);
 
     return (
         <div className={styles.container} style={{ background: "gray" }}>
-            <Canvas>
-                <Physics debug={true}>
+            <Canvas camera={{ position: [0, 10, -10], fov: 75 }} ref={cameraRef}>
+                <Physics debug={false}>
                     <ambientLight intensity={10} position={[0, 10, 0]} />
-                    <HeliModel position={[0, 10, 0]} heliRef={heliRef} />
+                    <HeliModel position={[0, 10, 0]} heliRef={heliRef} cameraRef={cameraRef} />
                     <RigidBody type="fixed">
                         <mesh>
-                            <boxGeometry args={[300, 1, 300]} />
+                            <boxGeometry args={[30, 1, 30]} />
                             <meshStandardMaterial color="gray" />
                         </mesh>
                     </RigidBody>
-                    <OrbitControls />
                 </Physics>
             </Canvas>
         </div>
