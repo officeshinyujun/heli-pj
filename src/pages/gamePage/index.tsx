@@ -1,10 +1,14 @@
 import { Canvas, useFrame, useLoader } from "@react-three/fiber";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
+
 import { useEffect, useRef, useState } from "react";
 import { RigidBody, Physics } from "@react-three/rapier";
 import * as THREE from "three";
 import backImage from "../../assets/sky.jpg"
 import styles from "./index.module.scss";
+import {FBXLoader} from "three/examples/jsm/loaders/FBXLoader.js";
+import {TextureLoader} from "three";
+import {OrbitControls} from "@react-three/drei";
 
 interface ModelProps {
     position: [number, number, number];
@@ -162,6 +166,23 @@ function HeliModel({ position, heliRef, cameraRef }: ModelProps) {
         };
     }, []);
 
+    const mixerRef = useRef<THREE.AnimationMixer | null>(null);
+
+    useEffect(() => {
+        if (gltf.animations.length > 0) {
+            mixerRef.current = new THREE.AnimationMixer(gltf.scene);
+            const action = mixerRef.current.clipAction(gltf.animations[0]); // 첫 번째 애니메이션 실행
+            action.play();
+        }
+    }, [gltf]);
+
+    useFrame((_, delta) => {
+        if (mixerRef.current) {
+            mixerRef.current.update(delta); // 애니메이션 업데이트
+        }
+    });
+    
+
     return (
         <RigidBody
             ref={heliRef}
@@ -172,7 +193,7 @@ function HeliModel({ position, heliRef, cameraRef }: ModelProps) {
             linearDamping={0.5}
             angularDamping={0.9}
         >
-            <primitive object={gltf.scene}/>
+            <primitive object = {gltf.scene}/>
         </RigidBody>
     );
 }
@@ -209,6 +230,7 @@ export default function GamePage() {
                             <meshStandardMaterial color="gray" />
                         </mesh>
                     </RigidBody>
+                    <OrbitControls/>
                     {/*<Forest position={[0, 0, 0]} />*/}
                 </Physics>
             </Canvas>
